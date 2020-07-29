@@ -1,4 +1,10 @@
 #!/usr/bin/python3
+# Copyright (c) 2020 Chris Hamilton.
+
+# This file is part of Shipware
+# (see https://github.com/cchamilt/shipware).
+
+# License: 3-clause BSD, see https://opensource.org/licenses/BSD-3-Clause
 import requests, datetime, time
 import shippo
 import re, json, csv, yaml
