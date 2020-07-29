@@ -1,0 +1,33 @@
+#Match on model - Tindie SKU is not complete as options change model
+#Options models append by hyphen in Tindie UI order
+Products:
+#    model:
+#        kit:
+#            -  customs_description :
+#               version             :
+#               manufacturer        : 
+#               package_quantity    : 
+#               bag_max             : 
+#               mass_unit           : oz
+#               weight              : 1
+#               hstariff            : 
+#               country             :  
+#            -  customs_description : 
+#               version             :
+#               manufacturer        :
+#               package_quantity    : 
+#               bag_max             : 
+#               mass_unit           : oz
+#               weight              : 1
+#               hstariff            : 
+#               country             :  
+#    model:
+#        -  customs_description : 
+#           version             :
+#           manufacturer        :
+#           package_quantity    : 
+#           bag_max             : 
+#           mass_unit           : oz
+#           weight              : 1
+#           hstariff            : 
+#           country             :  

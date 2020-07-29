@@ -1,0 +1,7 @@
+python-dotenv==0.14.0
+python-settings==0.2.2
+PyYAML==5.3.1
+requests==2.24.0
+shippo==2.0.0
+usaddress==0.5.10
+usaddress-scourgify==0.2.4

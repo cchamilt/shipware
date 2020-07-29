@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<Glabels-document version="4.0">
+  <Template brand="Dymo" part="11355" width="53.8583pt" height="144.567pt" size="Other" description="Return address labels">
+    <Label-rectangle round="0pt" width="53.8583pt" height="144.567pt" id="0" y_waste="0pt" x_waste="0pt">
+      <Markup-margin size="0pt"/>
+      <Layout x0="0pt" nx="1" y0="0pt" dy="144.567pt" dx="53.8583pt" ny="1"/>
+    </Label-rectangle>
+  </Template>
+  <Objects id="0" rotate="true">
+    <Object-barcode a5="0" x="1.424pt" checksum="true" a3="1" w="36pt" data="https://www.tindie.com/orders/${2}/" y="9pt" backend="qrencode" a1="0" a2="0" a4="0" h="36pt" lock_aspect_ratio="true" color="0xff" a0="1" text="false" style="qrcode"/>
+    <Object-text a4="0" font_italic="false" font_family="Sans" y="0.36pt" font_underline="false" a5="0" font_weight="normal" lock_aspect_ratio="false" shadow_x="1.296pt" line_spacing="1" h="35.64pt" a0="1" shadow_color="0xff" shadow_y="1.296pt" color="0xff" wrap="word" auto_shrink="false" font_size="4" valign="top" shadow_opacity="0.5" x="38.16pt" w="105.84pt" shadow="false" a3="1" align="left" a2="0" a1="0">
+      <p>${2} V: ${5}</p>
+      <p>${3}</p>
+      <p>${4}</p>
+      <p></p>
+    </Object-text>
+    <Object-text a4="0" font_italic="false" font_family="Sans" y="36pt" font_underline="false" a5="0" font_weight="normal" lock_aspect_ratio="false" shadow_x="1.3pt" line_spacing="1" h="18pt" a0="1" shadow_color="0xff" shadow_y="1.3pt" color="0xff" wrap="none" auto_shrink="true" font_size="4" valign="top" shadow_opacity="0.5" x="38.16pt" w="105.84pt" shadow="false" a3="1" align="left" a2="0" a1="0">
+      <p>QTY: ${6} ORDER: ${2}</p>
+    </Object-text>
+  </Objects>
+  <Merge type="Text/Comma" src="./shipping_bags.csv"/>
+  <Data/>
+</Glabels-document>

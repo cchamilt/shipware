@@ -1,0 +1,36 @@
+#settings.py
+from dotenv import load_dotenv
+from pathlib import Path  # Python 3.6+ only
+import os
+
+env_path = Path('.') / '.env'
+load_dotenv(dotenv_path=env_path)
+
+TINDIE_KEY = os.getenv("TINDIE_KEY")
+TINDIE_USER = os.getenv("TINDIE_USER")
+SHIPPO_KEY = os.getenv("SHIPPO_KEY")
+
+#How far back to check for items unshipped
+DAYS_LATE_SHIPPING = 15
+
+ADDRESS_FROM = {
+    "company": "Company Inc",
+    "street_no": "",
+    "name": "",
+    "street1": "",
+    "street2": "",
+    "city": "",
+    "state": "XX",
+    "zip": "",
+    "country": "US",
+    "phone": "+1",
+    "email": "info@example.com",
+}
+
+CUSTOMS_DECLARATION = {
+    "contents_type": 'MERCHANDISE',
+    "contents_explanation": 'Electronics',
+    "non_delivery_option": 'RETURN',
+    "certify": True,
+    "certify_signer": '',
+}

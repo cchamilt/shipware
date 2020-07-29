@@ -1,0 +1,108 @@
+Services:
+    United States Postal Service Flat Rate 2 Day Priority Mail:
+        parcel  : USPS_FlatRateEnvelope
+        token    : usps_priority
+
+    United States Postal Service Flat Rate Priority Mail:
+        parcel  : USPS_SmallFlatRateBox
+        token    : usps_priority
+
+    United States Postal Service Flat Rate Priority International:
+        parcel  : USPS_SmallFlatRateBox
+        token    : usps_priority_mail_international
+
+    United States Postal Service Flat Rate Priority Canada:
+        parcel  : USPS_SmallFlatRateBox
+        token    : usps_priority_mail_international
+
+    United States Postal Service Padded Envelope First Class Mail:
+        parcel  : USPS_firstclass_padded
+        token    : usps_first
+
+    United States Postal Service First Class Mail Envelope (2-4+ weeks):
+        parcel  : USPS_firstclass_padded
+        token    : usps_first_class_package_international_service
+
+    United States Postal Service First Class Mail Envelope  (2-8+ weeks):
+        parcel  : USPS_firstclass_padded
+        token    : usps_first_class_package_international_service
+
+    FedEx 2-Day Rush Handling + Fedex Overnight Envelope:
+        parcel  : FedEx_Box_Small_1
+        token    : fedex_2_day
+
+    FedEx Fedex Economy Ground Pak:
+        parcel  : FedEx_Pak_2
+        token    : fedex_ground
+
+    FedEx Fedex Economy Ground:
+        parcel  : My_small_box
+        token    : fedex_ground
+
+    DHL Express Recommended for Germany:
+        parcel  : DHL_small_envelope
+        token    : dhl_express_express_easy_nondoc
+
+    DHL Express Worldwide:
+        parcel  : DHL_small_envelope
+        token    : dhl_express_express_easy_nondoc
+
+
+#Check shippo for carrier specific parcel template names
+#Weight unit should be uniform with calculations further below
+#Units can be oz,g,kg,lbs
+Parcels:
+    USPS_FlatRateEnvelope:
+        template      : USPS_FlatRateEnvelope
+        mass_unit     : oz
+        weight        : 2
+
+    USPS_SmallFlatRateEnvelope:
+        template      : USPS_SmallFlatRateEnvelope
+        mass_unit     : oz
+        weight        : 2
+
+    USPS_SmallFlatRateBox:
+        template      : USPS_SmallFlatRateBox
+        mass_unit     : oz
+        weight        : 2
+
+    USPS_firstclass_padded:
+        length        : 8
+        width         : 5
+        height        : 0.5
+        distance_unit : in
+        weight        : 1
+        mass_unit     : oz
+
+    FedEx_Box_Small_1:
+        template      : FedEx_Box_Small_1
+        mass_unit     : oz
+        weight        : 2
+
+    FedEx_Pak_2:
+        template      : FedEx_Pak_2
+        mass_unit     : oz
+        weight        : 2
+
+
+    FedEx_Envelope:
+        template      : FedEx_Envelope
+        mass_unit     : oz
+        weight        : 2
+
+    DHL_small_envelope:
+        length        : 12
+        width         : 9.8
+        height        : 0.3
+        distance_unit : in
+        weight        : 2
+        mass_unit     : oz
+
+    My_small_box:
+        length        : 5
+        width         : 5
+        height        : 0.8
+        distance_unit : in
+        weight        : 2
+        mass_unit     : oz

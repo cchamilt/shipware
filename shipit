@@ -1,0 +1,405 @@
+#!/usr/bin/python3
+import requests, datetime, time
+import shippo
+import re, json, csv, yaml
+import os, traceback
+os.environ["SETTINGS_MODULE"] = 'settings' 
+from python_settings import settings
+
+#address cleansing
+from scourgify import normalize_address_record
+#from postal.parser import parse_address
+
+shippo.config.api_key = settings.SHIPPO_KEY
+
+# EXPIRES_TIME defines the time (in seconds) that a cached order list is kept.
+# Note that TindieOrdersAPI.get_orders makes a new request to Tindie's server and DOES NOT us the cache.
+
+EXPIRES_TIME = 3600 # 3600s = 1h
+
+class Parcel:
+    def __init__(self, service):
+        with open(r'parcels.yaml') as parcels_file:
+            self.parcel_list = yaml.load(parcels_file, Loader=yaml.FullLoader)
+            parcel_name = self.parcel_list["Services"][service]["parcel"]
+            self.parcel = self.parcel_list["Parcels"][parcel_name]
+            self.rate_token = self.parcel_list["Services"][service]["token"]
+
+        with open(r'products.yaml') as product_file:
+            self.product_list = yaml.load(product_file, Loader=yaml.FullLoader)
+    def add_products(self, products):
+        parcel_weight = int(self.parcel['weight'])
+        for product in products:
+            #TODO: mass_unit conversion
+            weight = 0
+            try:
+                items = self.product_list["Products"][product.model]["kit"]
+                for item in items:
+                    weight = int(item["package_quantity"]) * int(item["weight"])
+            except:
+                items = self.product_list["Products"][product.model]
+                weight = int(items[0]["package_quantity"]) * int(items[0]["weight"])
+            parcel_weight += weight * int(product.qty)
+        self.parcel['weight'] = str(parcel_weight)
+    def add_declaration(self, products):
+        self.customs_items = []
+        for product in products:
+            self.customs_product(product)
+    def customs_product(self, product):
+        #Kits: (export composite good)
+        #https://www.tuttlelaw.com/newsletters/class_of_kits_8-12-08.html
+        #If you have a "composite good" or a retail set under GRI 3(b), then the entire set 
+        #takes on the classification of that part or component from which the set derives its 
+        #"essential character." If you do not have "composite good" or a retail set, then, 
+        #regardless of the number of components you have, each is to be individually classified.
+        #First item in a kit declaration is the composite good
+        #Append kit to the description
+        #Maybe add item list for description
+        #kit is optional, but only the first item on the list of model will be used otherwise
+        #TODO: mass_unit conversion
+        weight = 0
+        try:
+            items = self.product_list["Products"][product.model]["kit"]
+            for item in items:
+                weight = int(item["package_quantity"]) * int(item["weight"])
+        except:
+            items = self.product_list["Products"][product.model]
+            weight = int(items[0]["package_quantity"]) * int(items[0]["weight"])
+
+        customs_item = {
+                "description": items[0]["customs_description"] + " Bundle",
+                "quantity": product.qty,
+                "net_weight": str(int(product.qty) * weight),
+                "mass_unit": items[0]["mass_unit"],
+                "value_amount": str(int(product.qty) * int(product.unit_price)),
+                "value_currency": "USD",
+                "origin_country": items[0]["country"],
+                "tariff_number": items[0]["hstariff"],
+            }
+        self.customs_items.append(customs_item)
+    def customs_declaration(self, declaration):
+        declaration[items] = self.customs_items
+        self.declaration = declaration
+
+
+class TindieProduct:
+    def __init__(self, data):
+        self.json_parsed = data
+        self.model = data['model_number']
+        self.options = data['options']
+        self.qty = data['quantity']
+        self.sku = data['sku']
+        self.unit_price = data['price_unit']
+        self.price = data['price_total']
+        self.name = data['product']
+        
+
+class TindieOrder:
+    #message is useful to indicate it shipped
+    def __init__(self, data):
+        self.json_parsed = data
+        self.date = datetime.datetime.strptime(data['date'], '%Y-%m-%dT%H:%M:%S.%f')
+        if data['date_shipped']:
+            self.date_shipped = datetime.datetime.strptime(data['date_shipped'], '%Y-%m-%dT%H:%M:%S.%f')
+        self.products = []
+        for i in data['items']:
+            self.products.append(TindieProduct(i))
+        self.shipped = data['shipped']
+        self.refunded = data['refunded']
+        self.order_number = data['number']
+        self.recipient_email = data['email']
+        self.recipient_phone = data['phone']
+        self.recipient_company = data['company_title']
+        self.recipient_message = data['message']
+        self.address_dict = {
+            'city':             data['shipping_city'],
+            'country':          data['shipping_country'],
+            'recipient_name':   data['shipping_name'],
+            'instructions':     data['shipping_instructions'],
+            'postcode':         data['shipping_postcode'],
+            'service':          data['shipping_service'],
+            'state':            data['shipping_state'],
+            'street':           data['shipping_street']
+        }
+        #self.address_str = data['shipping_name'] + ' '
+        self.address_str = data['shipping_street'].replace('\n', ', ') + ' '
+        self.address_str+= data['shipping_city'] + ', ' + data['shipping_state'] + ', ' + data['shipping_postcode'] + ', '
+        self.address_str+= data['shipping_country']
+        self.seller_payout = data['total_seller']
+        self.shipping_cost = data['total_shipping']
+        self.subtotal = data['total_subtotal']
+        self.tindie_fee = data['total_tindiefee']
+        self.cc_fee = data['total_ccfee']
+        if self.shipped:
+            self.tracking_code = data['tracking_code']
+            self.tracking_url = data['tracking_url']
+        else:
+            self.tracking_code = None
+            self.tracking_url = None
+
+#pass other fields to API
+#ie.  limit=30 
+class TindieOrdersAPI:
+    def __init__(self, username, api_key):
+        self.usr = username
+        self.api = api_key
+        # avoid using server twice for same request
+        # key is 'shipped' argument
+        self.cache = {False:None, True:None, None:None}
+    def get_orders_json(self, shipped = None):
+        '''Returns decoded JSON object from Tindie's Orders API'''
+        url = 'https://www.tindie.com/api/v1/order/?format=json&api_key='+self.api+'&username='+self.usr
+        if shipped!=None:
+            if type(shipped)!=bool:
+                raise ValueError("shipped must be True, False, or None.")
+            url+='&shipped='
+            if shipped:
+                url+='true'
+            else:
+                url+='false'
+        return requests.get(url).json()
+    def get_orders(self, shipped = None):
+        '''Returns a list of order objects'''
+        result = []
+        for i in self.get_orders_json(shipped)['orders']:
+            result.append(TindieOrder(i))
+        self.cache[shipped] = [time.time()+EXPIRES_TIME, result]
+        return result
+    def _get_cache_(self, shipped = None):
+        elem = self.cache[shipped]
+        if elem==None or elem[0]<time.time():
+            return self.get_orders(shipped)
+        return elem[1]
+    def get_last_order(self):
+        return self._get_cache_()[0]
+    def average_order_revenue(self, limit = 20):
+        '''Returns average order payout, including shipping
+Limit is the maximum number of orders to include, newest orders first.'''
+        num_orders = 0
+        amt_revenue = 0
+        for i in self._get_cache_():
+            amt_revenue += i.seller_payout
+            num_orders += 1
+            if limit!=None and num_orders>=limit:
+                break
+        return amt_revenue/num_orders
+    def average_order_shipping(self, limit = 20):
+        '''Returns average order shipping cost
+Limit is the maximum number of orders to include, newest orders first.'''
+        num_orders = 0
+        amt_shipping = 0
+        for i in self._get_cache_():
+            amt_shipping += i.shipping_cost
+            num_orders += 1
+            if limit!=None and num_orders>=limit:
+                break
+        return amt_shipping/num_orders
+    def average_order_timedelta(self, limit = 20):
+        '''Returns average time between orders as a datetime.timedelta
+Limit is the maximum number of orders to include, newest orders first.'''
+        orders = self._get_cache_()
+        timing = datetime.timedelta()
+        num_orders = 0
+        ls_time = orders.pop(0).date
+        for i in orders:
+            timing += ls_time - i.date
+            ls_time = i.date
+            num_orders += 1
+            if limit!=None and num_orders>=limit:
+                break
+        return timing/num_orders
+
+##########
+#start
+def main():
+    #grab unshipped from tindie
+    tindie = TindieOrdersAPI(settings.TINDIE_USER, settings.TINDIE_KEY)
+
+    #examine json in debug
+    #parsed = tindie.get_orders_json(False)
+    #print(json.dumps(parsed, indent=4, sort_keys=True))
+
+    unshipped_orders = tindie.get_orders(False)
+
+    with open('shipping_bags.csv', 'w') as csvfile:
+        fieldnames = ['Order', 'Product', 'Model', 'Manufacturer', 'Version', 'Quantity']
+        bagwriter = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=',',
+                                quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        bagwriter.writeheader()
+        for order in unshipped_orders:
+            #if refunded, skip - should never happen as they are API filtered
+            if order.refunded == True:
+                continue
+
+            #check if order already processed by shippo
+            #TODO: shippo add orders API with orders number
+            #get up to DAYS_LATE_SHIPPING days ago
+            date_limit = datetime.date.today() - datetime.timedelta(days=settings.DAYS_LATE_SHIPPING)
+            shipments = shippo.Shipment.all(object_created_gt = date_limit.isoformat())
+            for shipment in shipments.results:
+                #parse metadata, ie. "Tindie Order #XXXXX"
+                if order.order_number == shipment.metadata[13:]:
+                    continue
+
+            parcel = Parcel(order.address_dict['service'])
+            parcel.add_products(order.products)
+
+            #address to map
+            #char max 30 or 35 fedex/dhl, 
+            # shippo says 35...
+            # there is a street3 but not fully supported
+            #from https://github.com/GreenBuildingRegistry/usaddress-scourgify
+            #TODO: geotagging from google for korean,japanese addresses
+            #use https://github.com/openvenues/pypostal for international?
+            streets = order.address_dict['street'].split('\n', 1)
+            if len(streets) == 1:
+                streets = order.address_dict['street'].split(', ', 1)
+                if len(streets) == 1:
+                    streets.append("")
+
+            country = (order.address_dict['country']).upper()
+
+            if order.address_dict['country'] == '' or country[:1] == 'US' or country[:12] == 'UNITED STATES' or country == 'UNITED STATES OF AMERICA':
+                try:
+                    address_normal = normalize_address_record({
+                            'address_line_1': streets[0],
+                            'address_line_2': streets[1],
+                            'city': order.address_dict['city'],
+                            'state': order.address_dict['state'],
+                            'postal_code': order.address_dict['postcode']
+                        })
+
+                    #normalize_address_record(order.address_str)       
+                    if len(streets[0]) > 35 or len(streets[1]) > 35:
+                        streets[0] = address_normal['address_line_1']
+                        streets[1] = address_normal['address_line_2']
+                    city = address_normal['city']
+                    state = address_normal['state']
+                except Exception as e:
+                    print(e)
+                    traceback.print_exc()
+                    city = order.address_dict['city']
+                    state = order.address_dict['state']
+
+                #postal_code
+                country = 'US'
+            else:
+                #address_guess = parse_address(order.address_str)
+                city = order.address_dict['city'][:14]
+                state = order.address_dict['state'][:34]
+                country = order.address_dict['country'].upper()
+
+            #copy approximate company name if large to street
+            if len(order.recipient_company) > 35 and (len(streets) == 1 or streets[1] == ''):
+                streets[1] = streets[0]
+                company_split = order.recipient_company[:34].split(' ', 1)
+                streets[0] = company_split[1]
+
+            #TODO: do international cleaning better
+
+            parcel.parcel['metadata'] = order.address_dict['instructions']
+
+            if len(streets) == 1:
+                streets.append('')
+
+            address_to = {
+                "name": order.address_dict['recipient_name'][:34],
+                "company": order.recipient_company[:34],
+                "street1": streets[0][:34],
+                "street2": streets[1][:34],
+                "city": city,
+                "state": state,
+                "zip": order.address_dict['postcode'],
+                "country": country,
+                "phone": order.recipient_phone,
+                "email": order.recipient_email,
+                "metadata": "Tindie Order #" + str(order.order_number),
+            }
+
+            if country != 'US':
+                parcel.add_declaration(order.products)
+                parcel.customs_declaration(settings.CUSTOMS_DECLARATION)
+                declaration = shippo.CustomsDeclaration.create(
+                    parcel.declaration
+                )
+
+                shipment = shippo.Shipment.create(
+                    address_from=settings.ADDRESS_FROM,
+                    address_to=address_to,
+                    parcels=[parcel.parcel],
+                    customs_declaration=declaration.object_id,
+                    asynchronous=False)
+
+            else:
+                #TODO: trigger sales tax payment check logic
+                
+                shipment = shippo.Shipment.create(
+                    address_from=settings.ADDRESS_FROM,
+                    address_to=address_to,
+                    parcels=[parcel.parcel],
+                    asynchronous=False
+                )
+
+            # Rates are stored in the `rates` array
+            # The details on the returned object are here: https://goshippo.com/docs/reference#rates
+            rates = shipment.rates
+
+            found_rate = 0
+            for rate in rates:
+                if rate.servicelevel['token'] == parcel.rate_token:
+                    found_rate = rate.object_id
+
+            #TODO: search by cheapest tag too
+            if found_rate == 0:
+                print("Did not find the correct rate by token")
+                # Find the fastest possible transite time
+                eligible_rates = (
+                    rate for rate in rates if rate['estimated_days'] <= MAX_TRANSIT_TIME_DAYS)
+                rate = min(eligible_rates, key=lambda x: float(x['amount']))
+                print("Picked service %s %s for %s %s with est. transit time of %s days" %
+                    (rate['provider'], rate['servicelevel']['name'], rate['currency'], rate['amount'], rate['estimated_days']))
+
+            else:
+                # Purchase the desired rate. asynchronous=False indicates that the function will wait until the
+                # carrier returns a shipping label before it returns
+                transaction = shippo.Transaction.create(
+                    rate=found_rate, asynchronous=False)
+
+            # print label_url and tracking_number
+            if transaction.status == "SUCCESS":
+                print("Purchased label with tracking number %s" %
+                    transaction.tracking_number)
+                print("The label can be downloaded at %s" % transaction.label_url)
+            else:
+                print("Failed purchasing the label due to:")
+                for message in transaction.messages:
+                    print("- %s" % message['text'])
+
+            #TODO: submit tracking to tindie somehow?
+
+            #Print CSV package labels to process
+            for product in order.products:
+                try:
+                    items = parcel.product_list["Products"][product.model]["kit"]
+                except:
+                    items = parcel.product_list["Products"][product.model]
+
+                for item in items:
+                    groups = int(item["package_quantity"] / item["bag_max"])
+                    leftover = item["package_quantity"] % item["bag_max"]
+                    for x in range(0, groups):
+                        bagwriter.writerow({
+                                'Order': order.order_number, 
+                                'Product': item["customs_description"], 
+                                'Model': product.model,
+                                'Manufacturer': item["manufacturer"],
+                                'Version': item["version"],
+                                'Quantity': str(int(int(item["package_quantity"])/groups) + leftover),
+                            })
+                        leftover = 0
+
+        #TODO: Email option instead of print info and attach labels
+        #TODO: Accounting output of orders with Shipping and Tindie fees in csv file
+
+if __name__ == "__main__":
+    main()
