@@ -1,7 +1,7 @@
 #Match on model - Tindie SKU is not complete as options change model
 #Options models append by hyphen in Tindie UI order
 Products:
-#    model:
+#    model-option1-option2:
 #        kit:
 #            -  customs_description :
 #               version             :
