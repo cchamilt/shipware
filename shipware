@@ -9,7 +9,7 @@ import requests, datetime, time
 import shippo
 import re, json, csv, yaml
 import os, traceback
-os.environ["SETTINGS_MODULE"] = 'settings' 
+os.environ["SETTINGS_MODULE"] = 'settings'
 from python_settings import settings
 
 #address cleansing
@@ -54,9 +54,9 @@ class Parcel:
     def customs_product(self, product):
         #Kits: (export composite good)
         #https://www.tuttlelaw.com/newsletters/class_of_kits_8-12-08.html
-        #If you have a "composite good" or a retail set under GRI 3(b), then the entire set 
-        #takes on the classification of that part or component from which the set derives its 
-        #"essential character." If you do not have "composite good" or a retail set, then, 
+        #If you have a "composite good" or a retail set under GRI 3(b), then the entire set
+        #takes on the classification of that part or component from which the set derives its
+        #"essential character." If you do not have "composite good" or a retail set, then,
         #regardless of the number of components you have, each is to be individually classified.
         #First item in a kit declaration is the composite good
         #Append kit to the description
@@ -84,7 +84,7 @@ class Parcel:
             }
         self.customs_items.append(customs_item)
     def customs_declaration(self, declaration):
-        declaration[items] = self.customs_items
+        declaration['items'] = self.customs_items
         self.declaration = declaration
 
 
@@ -98,7 +98,7 @@ class TindieProduct:
         self.unit_price = data['price_unit']
         self.price = data['price_total']
         self.name = data['product']
-        
+
 
 class TindieOrder:
     #message is useful to indicate it shipped
@@ -144,7 +144,7 @@ class TindieOrder:
             self.tracking_url = None
 
 #pass other fields to API
-#ie.  limit=30 
+#ie.  limit=30
 class TindieOrdersAPI:
     def __init__(self, username, api_key):
         self.usr = username
@@ -251,7 +251,7 @@ def main():
             parcel.add_products(order.products)
 
             #address to map
-            #char max 30 or 35 fedex/dhl, 
+            #char max 30 or 35 fedex/dhl,
             # shippo says 35...
             # there is a street3 but not fully supported
             #from https://github.com/GreenBuildingRegistry/usaddress-scourgify
@@ -275,7 +275,7 @@ def main():
                             'postal_code': order.address_dict['postcode']
                         })
 
-                    #normalize_address_record(order.address_str)       
+                    #normalize_address_record(order.address_str)
                     if len(streets[0]) > 35 or len(streets[1]) > 35:
                         streets[0] = address_normal['address_line_1']
                         streets[1] = address_normal['address_line_2']
@@ -308,43 +308,53 @@ def main():
             if len(streets) == 1:
                 streets.append('')
 
-            address_to = {
-                "name": order.address_dict['recipient_name'][:34],
-                "company": order.recipient_company[:34],
-                "street1": streets[0][:34],
-                "street2": streets[1][:34],
-                "city": city,
-                "state": state,
-                "zip": order.address_dict['postcode'],
-                "country": country,
-                "phone": order.recipient_phone,
-                "email": order.recipient_email,
-                "metadata": "Tindie Order #" + str(order.order_number),
-            }
+            address_to = shippo.Address.create(
+                name     = order.address_dict['recipient_name'][:34],
+                company  = order.recipient_company[:34],
+                street1  = streets[0][:34],
+                street2  = streets[1][:34],
+                city     = city,
+                state    = state,
+                zip      = order.address_dict['postcode'],
+                country  = country,
+                phone    = order.recipient_phone,
+                email    = order.recipient_email,
+                metadata = "Tindie Order #" + str(order.order_number),
+            )
 
             if country != 'US':
                 parcel.add_declaration(order.products)
                 parcel.customs_declaration(settings.CUSTOMS_DECLARATION)
                 declaration = shippo.CustomsDeclaration.create(
-                    parcel.declaration
+                    **parcel.declaration
                 )
 
                 shipment = shippo.Shipment.create(
                     address_from=settings.ADDRESS_FROM,
-                    address_to=address_to,
+                    address_to=address_to.object_id,
                     parcels=[parcel.parcel],
                     customs_declaration=declaration.object_id,
                     asynchronous=False)
 
             else:
                 #TODO: trigger sales tax payment check logic
-                
+                address_result = shippo.Address.validate(address_to.object_id)
+                print(address_result['validation_results'])
+
+                if address_result['validation_results']['is_valid']:
+                    print("Address found!")
+                else:
+                    print("Address incorrect, manually ship this item!")
+                    continue
+
                 shipment = shippo.Shipment.create(
                     address_from=settings.ADDRESS_FROM,
-                    address_to=address_to,
+                    address_to=address_to.object_id,
                     parcels=[parcel.parcel],
                     asynchronous=False
                 )
+
+            #print(shipment)
 
             # Rates are stored in the `rates` array
             # The details on the returned object are here: https://goshippo.com/docs/reference#rates
@@ -354,16 +364,22 @@ def main():
             for rate in rates:
                 if rate.servicelevel['token'] == parcel.rate_token:
                     found_rate = rate.object_id
+                if "FASTEST" in rate.attributes:
+                    fastest = rate.object_id
+                if "CHEAPEST" in rate.attributes:
+                    cheapest = rate.object_id
 
             #TODO: search by cheapest tag too
             if found_rate == 0:
                 print("Did not find the correct rate by token")
-                # Find the fastest possible transite time
-                eligible_rates = (
-                    rate for rate in rates if rate['estimated_days'] <= MAX_TRANSIT_TIME_DAYS)
-                rate = min(eligible_rates, key=lambda x: float(x['amount']))
-                print("Picked service %s %s for %s %s with est. transit time of %s days" %
-                    (rate['provider'], rate['servicelevel']['name'], rate['currency'], rate['amount'], rate['estimated_days']))
+                continue
+                # # TODO: Find the cheapest possible within max transite time
+                # MAX_TRANSIT_TIME_DAYS = 14
+                # eligible_rates = (
+                #     rate for rate in rates if rate['estimated_days'] <= MAX_TRANSIT_TIME_DAYS)
+                # rate = min(eligible_rates, key=lambda x: float(x['amount']))
+                # print("Picked service %s %s for %s %s with est. transit time of %s days" %
+                #     (rate['provider'], rate['servicelevel']['name'], rate['currency'], rate['amount'], rate['estimated_days']))
 
             else:
                 # Purchase the desired rate. asynchronous=False indicates that the function will wait until the
@@ -395,11 +411,11 @@ def main():
                     leftover = item["package_quantity"] % item["bag_max"]
                     for x in range(0, groups):
                         bagwriter.writerow({
-                                'Order': order.order_number, 
-                                'Product': item["customs_description"], 
+                                'Order': order.order_number,
+                                'Product': item.get("customs_description", ""),
                                 'Model': product.model,
-                                'Manufacturer': item["manufacturer"],
-                                'Version': item["version"],
+                                'Manufacturer': item.get("manufacturer", ""),
+                                'Version': item.get("version", ""),
                                 'Quantity': str(int(int(item["package_quantity"])/groups) + leftover),
                             })
                         leftover = 0
